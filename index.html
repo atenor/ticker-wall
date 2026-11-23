@@ -1316,7 +1316,8 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
         const r = series.find((x) => x.s === o.s), lim = num(o.limit);
         if (r && lim != null) lims.push({ color: r.color, v: unit === "px" ? lim : (lim / r.base - 1) * 100, dash: [7, 5], label: `${o.s} limit ${fmtPx(lim)}`, short: `${o.s} limit` });
       }
-      for (const x of V().symbols) {
+      // Purchase-price lines on price charts only, not the % view.
+      if (unit !== "pct") for (const x of V().symbols) {
         const c = num(x.cost), r = series.find((y) => y.s === x.s);
         if (c && heldOf(x) && r) lims.push({ color: r.color, v: unit === "px" ? c : (c / r.base - 1) * 100, dash: [2, 4], label: `${x.s} cost ${fmtPx(c)}`, short: `${x.s} cost` });
       }
