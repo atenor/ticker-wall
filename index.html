@@ -11,6 +11,7 @@
 <meta name="robots" content="noindex,nofollow">
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}img{max-width:100%}[hidden]{display:none!important}</style>
 <title>Ticker Wall</title>
+<title>Ticker Wall</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
 /* Layout: a trading-floor wall. Header strip, totals row, card grid with an orders rail on wide screens; one column on phones. */
@@ -411,6 +412,7 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
         <h2 id="chartH">Every symbol, % change from yesterday's close</h2>
         <div class="chart-tools">
           <select id="chartSym" aria-label="Which symbol to chart"><option value="">All symbols, % change</option><option value="@price">All symbols, price</option></select>
+          <div class="ranges scales" id="scaleTog" role="group" aria-label="Price scale" hidden><button type="button" data-scale="log" aria-pressed="true">Log</button><button type="button" data-scale="lin" aria-pressed="false">Linear</button></div>
           <div class="ranges" role="group" aria-label="Time range">
             <button type="button" data-range="1D" aria-pressed="true">1D</button>
             <button type="button" data-range="1W" aria-pressed="false">1W</button>
@@ -1155,10 +1157,8 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
     };
   }
   const liveHist = () => !sampleMode() && !!cfg.tdKey && !tdStopped();
-  const GRID_MAX = 16;
-  const priceGrid = () => chartSym === "@price";
+  const priceAll = () => chartSym === "@price";
   function chartSyms() {
-    if (priceGrid()) return allSyms().slice(0, GRID_MAX).map((x) => x.s);
     return chartSym && allSyms().some((x) => x.s === chartSym) ? [chartSym] : allSyms().slice(0, PAL.length).map((x) => x.s);
   }
   const PAGE_T0 = Date.now();
@@ -1201,10 +1201,11 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
   }
 
   // ---------- combined chart ----------
-  let chartRangeKey = "1D", chartSym = "", chartRaf = 0, hoverX = null;
-  try { const c = JSON.parse(localStorage.getItem("tickerwall.chart") || "null"); if (c && RANGES[c.r]) chartRangeKey = c.r; if (c && typeof c.s === "string") chartSym = c.s; } catch (e) {}
-  function saveChartPrefs() { try { localStorage.setItem("tickerwall.chart", JSON.stringify({ r: chartRangeKey, s: chartSym })); } catch (e) {} }
-  function syncRangeButtons() { document.querySelectorAll(".ranges button").forEach((x) => x.setAttribute("aria-pressed", x.dataset.range === chartRangeKey ? "true" : "false")); }
+  let chartRangeKey = "1D", chartSym = "", chartRaf = 0, hoverX = null, priceLog = true;
+  try { const c = JSON.parse(localStorage.getItem("tickerwall.chart") || "null"); if (c && RANGES[c.r]) chartRangeKey = c.r; if (c && typeof c.s === "string") chartSym = c.s; if (c && c.lin === true) priceLog = false; } catch (e) {}
+  function saveChartPrefs() { try { localStorage.setItem("tickerwall.chart", JSON.stringify({ r: chartRangeKey, s: chartSym, lin: !priceLog })); } catch (e) {} }
+  function syncRangeButtons() { document.querySelectorAll("[data-range]").forEach((x) => x.setAttribute("aria-pressed", x.dataset.range === chartRangeKey ? "true" : "false"));
+    document.querySelectorAll("[data-scale]").forEach((x) => x.setAttribute("aria-pressed", (x.dataset.scale === "log") === priceLog ? "true" : "false")); }
   function fillChartSym() {
     const sel = $("chartSym");
     sel.innerHTML = `<option value="">All symbols, % change</option><option value="@price">All symbols, price</option>` + allSyms().map((x) => `<option value="${esc(x.s)}">${esc(x.s)} price</option>`).join("");
@@ -1242,7 +1243,7 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
   }
   function chartSeries() {
     const single = chartSym && allSyms().some((x) => x.s === chartSym) ? chartSym : "";
-    const unit = single || priceGrid() ? "px" : "pct", now = Date.now();
+    const unit = single || priceAll() ? "px" : "pct", now = Date.now();
     let tmin = Infinity;
     const series = [];
     for (const s of chartSyms()) {
@@ -1284,13 +1285,14 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
     const rem = parseFloat(css.fontSize) || 16;
     const { series, tmin, tmax, unit, single } = chartSeries();
     const R = RANGES[chartRangeKey], rk = chartRangeKey;
-    const grid = priceGrid();
-    const title = single ? `${single} price, ${R.label}` : grid ? `Every symbol's price, ${R.label}, each on its own scale` : rk === "1D" ? "Every symbol, % change from yesterday's close" : `Every symbol, % change over ${R.label}`;
+    const combo = priceAll(), lg = combo && priceLog;
+    $("scaleTog").hidden = !combo;
+    const title = single ? `${single} price, ${R.label}` : combo ? `Every symbol's price, ${R.label}, ${lg ? "log" : "linear"} scale` : rk === "1D" ? "Every symbol, % change from yesterday's close" : `Every symbol, % change over ${R.label}`;
     if ($("chartH").textContent !== title) $("chartH").textContent = title;
     renderHistNote(series);
     const fv = (v) => unit === "px" ? fmtPx(v) : fmtPct(v);
     $("legend").innerHTML = series.map((r) => `<span><i style="background:${r.color}"></i><b>${esc(r.s)}</b><em>${unit === "px" ? fmtPx(r.px) + " " : ""}${fmtPct(r.chg)}</em></span>`).join("")
-      + (!single && allSyms().length > (grid ? GRID_MAX : PAL.length) ? `<span><em>+${allSyms().length - (grid ? GRID_MAX : PAL.length)} more, pick one above</em></span>` : "");
+      + (!single && allSyms().length > PAL.length ? `<span><em>+${allSyms().length - PAL.length} more, pick one above</em></span>` : "");
     ctx.font = `${0.72 * rem}px ${tok("--f-num")}`;
     if (!series.length) {
       const msg = !allSyms().length ? "Add symbols to see them here"
@@ -1305,8 +1307,8 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
       $("offKey").innerHTML = "";
       $("tip").hidden = true; return;
     }
-    if (grid) { drawPriceGrid(ctx, w, h, series, tmin, tmax, tok, rem); return; }
-    $("tip").style.top = "";
+    // Log scale: equal heights mean equal % moves, so a $30 and a $900 stock both show their swings.
+    const sc = lg ? Math.log : (v) => v;
     let mn = unit === "pct" ? 0 : Infinity, mx = unit === "pct" ? 0 : -Infinity;
     for (const r of series) for (const p of r.pts) { if (p.v < mn) mn = p.v; if (p.v > mx) mx = p.v; }
     // Limit and cost lines only while positions are shown.
@@ -1321,26 +1323,36 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
         if (c && heldOf(x) && r) lims.push({ color: r.color, v: unit === "px" ? c : (c / r.base - 1) * 100, dash: [2, 4], label: `${x.s} cost ${fmtPx(c)}`, short: `${x.s} cost` });
       }
     }
+    if (lg) {
+      let a = Math.log(Math.max(mn, 1e-4)), b = Math.log(Math.max(mx, 1e-4));
+      const span0 = Math.max(0.004, b - a);
+      for (const l of lims) if (l.v > 0 && Math.log(l.v) >= a - span0 * 0.6 && Math.log(l.v) <= b + span0 * 0.6) { a = Math.min(a, Math.log(l.v)); b = Math.max(b, Math.log(l.v)); l.inside = true; }
+      if (b - a < 0.004) { const m = (a + b) / 2; a = m - 0.002; b = m + 0.002; }
+      const pad = (b - a) * 0.06; mn = Math.exp(a - pad); mx = Math.exp(b + pad);
+    } else {
     { const span0 = Math.max(unit === "pct" ? 0.4 : Math.abs(mx) * 0.004, mx - mn);
       for (const l of lims) if (l.v >= mn - span0 * 1.5 && l.v <= mx + span0 * 1.5) { mn = Math.min(mn, l.v); mx = Math.max(mx, l.v); l.inside = true; } }
     const minSpan = unit === "pct" ? 0.4 : Math.max(0.02, Math.abs(mx) * 0.004);
     if (mx - mn < minSpan) { const m = (mx + mn) / 2; mx = m + minSpan / 2; mn = m - minSpan / 2; }
     const padV = (mx - mn) * 0.08; mn -= padV; mx += padV;
     if (unit === "px" && mn < 0 && series.every((r) => r.pts.every((p) => p.v >= 0))) mn = 0;
+    }
     const L = 4 * rem, Rm = 5.2 * rem, T = 0.5 * rem, B = 1.7 * rem;
     const X = (t) => L + (t - tmin) / Math.max(1, tmax - tmin) * (w - L - Rm);
-    const Y = (v) => T + (1 - (v - mn) / (mx - mn)) * (h - T - B);
+    const smn = sc(mn), smx = sc(mx), Y = (v) => T + (1 - (sc(Math.max(v, 1e-4)) - smn) / (smx - smn)) * (h - T - B);
     // grid + y labels
     const ys = niceStep(mx - mn, 5);
     const yDec = ys < 0.1 ? 2 : ys < 1 ? (unit === "px" ? 2 : 1) : 0;
+    const yTicks = lg ? logTicks(mn, mx, Math.max(3, Math.min(7, Math.floor((h - T - B) / (2.6 * rem))))) : [];
+    if (!lg) for (let v = Math.ceil(mn / ys) * ys; v <= mx + ys * 1e-6; v += ys) yTicks.push(v);
     ctx.lineWidth = 1; ctx.textAlign = "right"; ctx.textBaseline = "middle";
-    for (let v = Math.ceil(mn / ys) * ys; v <= mx + ys * 1e-6; v += ys) {
+    for (const v of yTicks) {
       const y = Math.round(Y(v)) + 0.5, zero = unit === "pct" && Math.abs(v) < ys / 1000;
       ctx.strokeStyle = zero ? tok("--muted") : tok("--line");
       ctx.setLineDash(zero ? [4, 4] : []);
       ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(w - Rm, y); ctx.stroke();
       ctx.fillStyle = tok("--muted");
-      const lab = unit === "px" ? v.toLocaleString("en-US", { minimumFractionDigits: yDec, maximumFractionDigits: yDec })
+      const lab = lg ? "$" + fmtTick(v) : unit === "px" ? (combo ? "$" : "") + v.toLocaleString("en-US", { minimumFractionDigits: yDec, maximumFractionDigits: yDec })
         : (zero ? "0" : (v > 0 ? "+" : "−") + Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: yDec, maximumFractionDigits: yDec })) + "%";
       ctx.fillText(lab, L - 0.5 * rem, y);
     }
@@ -1370,7 +1382,7 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
     const cols = Math.max(60, Math.round(w - L - Rm));
     for (const r of series) {
       const pts = thin(r.pts, cols);
-      if (unit === "px") {
+      if (unit === "px" && !combo) {
         const grad = ctx.createLinearGradient(0, T, 0, h - B);
         grad.addColorStop(0, r.color + "33"); grad.addColorStop(1, r.color + "00");
         ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(X(p.t), Y(p.v)) : ctx.moveTo(X(p.t), Y(p.v)));
@@ -1433,103 +1445,35 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
     const tw = tip.offsetWidth;
     tip.style.left = (hoverX + 14 + tw > w ? hoverX - 14 - tw : hoverX + 14) + "px";
   }
-  // Small multiples: one panel per symbol, each with its own price scale, so a $30 and a $900 stock both read clearly.
-  function drawPriceGrid(ctx, w, h, series, tmin, tmax, tok, rem) {
-    const n = series.length, gap = 0.8 * rem, rk = chartRangeKey;
-    let best = { c: 1, r: 1, sc: -1 };
-    for (let c = 1; c <= n; c++) {
-      const r = Math.ceil(n / c), pw = (w - gap * (c - 1)) / c, ph = (h - gap * (r - 1)) / r;
-      if (pw < 8 * rem || ph < 5 * rem) continue;
-      const a = pw / ph, sc = Math.min(a / 2.2, 2.2 / a) * (n / (c * r));
-      if (sc > best.sc) best = { c, r, sc };
+  // Log-scale gridlines at round prices (1, 2, 5 × 10ⁿ, finer when the range is narrow).
+  function logTicks(mn, mx, want) {
+    let best = [];
+    for (const ms of [[1], [1, 2, 5], [1, 1.5, 2, 3, 5, 7], [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 9]]) {
+      const out = [];
+      for (let e = Math.floor(Math.log10(mn)) - 1; e <= Math.ceil(Math.log10(mx)); e++) for (const m of ms) { const v = m * Math.pow(10, e); if (v >= mn && v <= mx) out.push(v); }
+      if (out.length <= want) best = out; else break;
     }
-    if (best.sc < 0) best = { c: Math.max(1, Math.floor(w / (8 * rem))), r: 0 }, best.r = Math.ceil(n / best.c);
-    const { c: cols, r: rows } = best, pw = (w - gap * (cols - 1)) / cols, ph = (h - gap * (rows - 1)) / rows;
-    const hidden = V().hide, HH = 1.6 * rem, L = 3.6 * rem, Rr = 0.6 * rem, Bt = 1.3 * rem;
-    const tf = rk === "1D" ? new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }) : rk === "1W" ? new Intl.DateTimeFormat("en-US", { weekday: "short" })
-      : (tmax - tmin) < 400 * DAY ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }) : new Intl.DateTimeFormat("en-US", { year: "numeric" });
-    let hov = null;
-    series.forEach((r, i) => {
-      const cx = (i % cols) * (pw + gap), cy = Math.floor(i / cols) * (ph + gap), lastRow = Math.floor(i / cols) === rows - 1 || i + cols >= n;
-      const x0 = cx + L, x1 = cx + pw - Rr, y0 = cy + HH + 0.3 * rem, y1 = cy + ph - (lastRow ? Bt : 0.5 * rem);
-      ctx.strokeStyle = tok("--line"); ctx.lineWidth = 1; ctx.strokeRect(Math.round(cx) + 0.5, Math.round(cy) + 0.5, Math.round(pw) - 1, Math.round(ph) - 1);
-      // header: symbol left, price and change right
-      ctx.textBaseline = "middle";
-      ctx.fillStyle = r.color; ctx.beginPath(); ctx.arc(cx + 0.8 * rem, cy + HH / 2 + 0.15 * rem, 0.28 * rem, 0, Math.PI * 2); ctx.fill();
-      ctx.font = `700 ${0.85 * rem}px ${tok("--f-display")}`; ctx.textAlign = "left"; ctx.fillStyle = tok("--text");
-      ctx.fillText(r.s, cx + 1.3 * rem, cy + HH / 2 + 0.15 * rem);
-      ctx.textAlign = "right"; ctx.font = `600 ${0.78 * rem}px ${tok("--f-num")}`;
-      const chg = fmtPct(r.chg); ctx.fillStyle = tok(r.chg > 0 ? "--up" : r.chg < 0 ? "--down" : "--muted");
-      ctx.fillText(chg, cx + pw - 0.6 * rem, cy + HH / 2 + 0.15 * rem);
-      const cw = ctx.measureText(chg).width; ctx.fillStyle = tok("--text");
-      ctx.fillText(fmtPx(r.px), cx + pw - 1.2 * rem - cw, cy + HH / 2 + 0.15 * rem);
-      if (y1 - y0 < 1.5 * rem) return;
-      // scale: this symbol's own range, widened for its limit or cost only when they sit close
-      let mn = Infinity, mx = -Infinity;
-      for (const p of r.pts) { mn = Math.min(mn, p.v); mx = Math.max(mx, p.v); }
-      const refs = [];
-      if (!hidden) {
-        for (const o of V().orders) if (o.s === r.s && num(o.limit) != null) refs.push({ v: num(o.limit), col: tok("--brass"), dash: [6, 4], lab: "limit " + fmtPx(num(o.limit)) });
-        const x = V().symbols.find((y) => y.s === r.s); if (x && heldOf(x) && num(x.cost)) refs.push({ v: num(x.cost), col: tok("--cost"), dash: [2, 3], lab: "cost " + fmtPx(num(x.cost)) });
-      }
-      const sp0 = Math.max(mx - mn, Math.abs(mx) * 0.004);
-      const near = refs.filter((f) => f.v >= mn - 0.6 * sp0 && f.v <= mx + 0.6 * sp0);
-      for (const f of near) { mn = Math.min(mn, f.v); mx = Math.max(mx, f.v); }
-      const minSpan = Math.max(0.02, Math.abs(mx) * 0.004);
-      if (mx - mn < minSpan) { const m = (mx + mn) / 2; mx = m + minSpan / 2; mn = m - minSpan / 2; }
-      const pad = (mx - mn) * 0.1; mn -= pad; mx += pad;
-      const X = (t) => x0 + (t - tmin) / Math.max(1, tmax - tmin) * (x1 - x0), Y = (v) => y0 + (1 - (v - mn) / (mx - mn)) * (y1 - y0);
-      // a few price gridlines, labelled at the left
-      const st = niceStep(mx - mn, Math.max(2, Math.min(4, Math.floor((y1 - y0) / (1.6 * rem)))));
-      const dec = st < 0.1 ? 2 : st < 1 ? 2 : 0;
-      ctx.font = `${0.66 * rem}px ${tok("--f-num")}`; ctx.textAlign = "right"; ctx.textBaseline = "middle";
-      for (let v = Math.ceil(mn / st) * st; v <= mx + st * 1e-6; v += st) {
-        const y = Math.round(Y(v)) + 0.5; ctx.strokeStyle = tok("--line"); ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
-        ctx.fillStyle = tok("--muted"); ctx.fillText(v.toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec }), x0 - 0.35 * rem, y);
-      }
-      // where the range started (yesterday's close for 1D)
-      if (r.base >= mn && r.base <= mx) { const y = Math.round(Y(r.base)) + 0.5; ctx.strokeStyle = tok("--muted"); ctx.setLineDash([3, 4]); ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke(); ctx.setLineDash([]); }
-      for (const f of near) {
-        const y = Math.round(Y(f.v)) + 0.5; ctx.strokeStyle = f.col; ctx.lineWidth = 1.5; ctx.setLineDash(f.dash);
-        ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
-        ctx.font = `600 ${0.62 * rem}px ${tok("--f-body")}`; ctx.textAlign = "left"; ctx.fillStyle = f.col; ctx.fillText(f.lab, x0 + 0.3 * rem, y - 0.5 * rem);
-      }
-      const pts = thin(r.pts, Math.max(40, Math.round(x1 - x0)));
-      const grad = ctx.createLinearGradient(0, y0, 0, y1); grad.addColorStop(0, r.color + "33"); grad.addColorStop(1, r.color + "00");
-      ctx.beginPath(); pts.forEach((p, k) => k ? ctx.lineTo(X(p.t), Y(p.v)) : ctx.moveTo(X(p.t), Y(p.v)));
-      ctx.lineTo(X(pts[pts.length - 1].t), y1); ctx.lineTo(X(pts[0].t), y1); ctx.closePath(); ctx.fillStyle = grad; ctx.fill();
-      ctx.beginPath(); pts.forEach((p, k) => k ? ctx.lineTo(X(p.t), Y(p.v)) : ctx.moveTo(X(p.t), Y(p.v)));
-      ctx.strokeStyle = r.color; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.stroke(); ctx.lineWidth = 1;
-      const lp = pts[pts.length - 1];
-      ctx.beginPath(); ctx.arc(X(lp.t), Y(lp.v), 4.2, 0, Math.PI * 2); ctx.fillStyle = tok("--panel"); ctx.fill();
-      ctx.beginPath(); ctx.arc(X(lp.t), Y(lp.v), 3, 0, Math.PI * 2); ctx.fillStyle = r.color; ctx.fill();
-      if (lastRow) {
-        ctx.font = `${0.64 * rem}px ${tok("--f-num")}`; ctx.fillStyle = tok("--muted"); ctx.textBaseline = "top";
-        ctx.textAlign = "left"; ctx.fillText(tf.format(new Date(tmin)), x0, y1 + 0.3 * rem);
-        ctx.textAlign = "right"; ctx.fillText(rk === "1D" ? "Now" : tf.format(new Date(tmax)), x1, y1 + 0.3 * rem);
-      }
-      if (hoverX != null && hoverY != null && hoverX >= x0 && hoverX <= x1 && hoverY >= cy && hoverY <= cy + ph) hov = { r, X, Y, x0, x1, y0, y1, cy };
-    });
-    $("offKey").innerHTML = "";
-    const tip = $("tip");
-    if (!hov) { tip.hidden = true; return; }
-    const { r, Y, x0, x1, y0, y1 } = hov, tH = tmin + (hoverX - x0) / (x1 - x0) * (tmax - tmin);
-    let v = r.pts[0].v; for (const p of r.pts) { if (p.t > tH) break; v = p.v; }
-    ctx.strokeStyle = tok("--muted"); ctx.beginPath(); ctx.moveTo(Math.round(hoverX) + 0.5, y0); ctx.lineTo(Math.round(hoverX) + 0.5, y1); ctx.stroke();
-    ctx.beginPath(); ctx.arc(hoverX, Y(v), 3.5, 0, Math.PI * 2); ctx.fillStyle = r.color; ctx.fill();
-    const tfh = rk === "1D" ? tFmt : rk === "1W" ? tipWeek : tipDay;
-    tip.innerHTML = `<span class="tt">${tfh.format(new Date(tH))}</span><div><span><i style="background:${r.color}"></i>${esc(r.s)}</span><em class="${cls(v - r.base)}">${fmtPx(v)} ${fmtPct((v / r.base - 1) * 100)}</em></div>`;
-    tip.hidden = false; tip.style.top = Math.max(0, hov.cy + 0.4 * rem) + "px";
-    const tw = tip.offsetWidth; tip.style.left = (hoverX + 14 + tw > w ? hoverX - 14 - tw : hoverX + 14) + "px";
+    if (best.length >= 3) return best;
+    const st = niceStep(mx - mn, want), out = [];
+    for (let v = Math.ceil(mn / st) * st; v <= mx; v += st) out.push(v);
+    return out;
+  }
+  function fmtTick(v) {
+    const d = v >= 100 ? 0 : v >= 10 ? (Math.abs(v - Math.round(v)) < 1e-6 ? 0 : 1) : 2;
+    return v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
   }
   let hoverY = null;
   const tipWeek = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   const tipDay = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
   $("bigChart").addEventListener("pointermove", (ev) => { const b = ev.currentTarget.getBoundingClientRect(); hoverX = ev.clientX - b.left; hoverY = ev.clientY - b.top; scheduleChart(); });
   $("bigChart").addEventListener("pointerleave", () => { hoverX = null; hoverY = null; scheduleChart(); });
-  document.querySelector(".ranges").addEventListener("click", (ev) => {
+  document.querySelector(".ranges:not(.scales)").addEventListener("click", (ev) => {
     const b = ev.target.closest("[data-range]"); if (!b) return;
     chartRangeKey = b.dataset.range; saveChartPrefs(); syncRangeButtons(); ensureHist(); scheduleChart();
+  });
+  $("scaleTog").addEventListener("click", (ev) => {
+    const b = ev.target.closest("[data-scale]"); if (!b) return;
+    priceLog = b.dataset.scale === "log"; saveChartPrefs(); syncRangeButtons(); scheduleChart();
   });
   $("chartSym").addEventListener("change", () => { chartSym = $("chartSym").value; saveChartPrefs(); ensureHist(); scheduleChart(); });
 
