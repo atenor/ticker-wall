@@ -181,6 +181,18 @@ input[type=text], input[type=password], input[type=number], select { background:
 .chart-wrap { position: relative; height: max(18rem, calc(100vh - 17rem)); min-width: 0; }
 body.v-activity .chart-wrap { height: max(13rem, calc(42vh - 6rem)); }
 #bigChart { width: 100%; height: 100%; display: block; touch-action: pan-y; }
+/* Single-stock live view: big price that flashes on each trade, pulsing dot at the latest point */
+.live { display: flex; align-items: baseline; gap: 0.4rem 1.4rem; flex-wrap: wrap; line-height: 1; }
+.live .lv-sym { font-family: var(--f-display); font-weight: 700; font-size: clamp(1.4rem, 3vw, 3rem); }
+.live .lv-px { font-family: var(--f-num); font-weight: 700; font-size: clamp(2.8rem, 8vw, 8rem); letter-spacing: -0.03em; border-radius: 0.6rem; padding: 0 0.25rem; margin-left: -0.25rem; }
+.live .lv-chg { font-family: var(--f-num); font-weight: 600; font-size: clamp(1.3rem, 3.2vw, 3.4rem); white-space: nowrap; }
+.live .lv-age { font-size: clamp(0.75rem, 1vw, 1rem); color: var(--muted); font-family: var(--f-num); }
+.live .lv-px.tick-up { animation: lvUp 0.9s ease-out; } .live .lv-px.tick-down { animation: lvDown 0.9s ease-out; }
+@keyframes lvUp { from { background: color-mix(in srgb, var(--up) 32%, transparent); color: var(--up); } to { background: transparent; } }
+@keyframes lvDown { from { background: color-mix(in srgb, var(--down) 32%, transparent); color: var(--down); } to { background: transparent; } }
+.nowdot { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; pointer-events: none; animation: nowPulse 1.6s ease-out infinite; }
+@keyframes nowPulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 65%, transparent); } 80%, 100% { box-shadow: 0 0 0 16px transparent; } }
+@media (prefers-reduced-motion: reduce) { .nowdot, .live .lv-px.tick-up, .live .lv-px.tick-down { animation: none; } }
 .tip { position: absolute; top: 0.4rem; pointer-events: none; background: var(--ink); border: 1px solid var(--line); border-radius: 0.5rem; padding: 0.45rem 0.6rem; font-size: 0.78rem; display: grid; gap: 0.15rem; min-width: 9rem; box-shadow: 0 6px 24px rgba(0,0,0,0.35); }
 .tip .tt { color: var(--muted); font-family: var(--f-num); margin-bottom: 0.15rem; }
 .tip div { display: flex; justify-content: space-between; gap: 0.8rem; align-items: center; }
@@ -424,10 +436,11 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
           </div>
         </div>
       </div>
+      <div class="live" id="live" hidden aria-live="off"><span class="lv-sym" id="lvSym"></span><span class="lv-px" id="lvPx">—</span><span class="lv-chg flat" id="lvChg"></span><span class="lv-age" id="lvAge"></span></div>
       <p class="hist-note" id="histNote"></p>
       <div class="legend" id="legend"></div>
       <div class="offkey" id="offKey"></div>
-      <div class="chart-wrap" id="chartWrap"><canvas id="bigChart" aria-label="Line chart of every symbol's percent change today"></canvas><div class="tip" id="tip" hidden></div></div>
+      <div class="chart-wrap" id="chartWrap"><canvas id="bigChart" aria-label="Line chart of every symbol's percent change today"></canvas><i class="nowdot" id="nowDot" hidden></i><div class="tip" id="tip" hidden></div></div>
     </section>
     <section class="activity" id="activity" hidden>
       <div class="panel tape-panel">
@@ -1274,6 +1287,20 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
     }
     if (el.textContent !== t) el.textContent = t;
   }
+  function liveSym() { return chartSym && allSyms().some((x) => x.s === chartSym) ? chartSym : ""; }
+  function renderLive(prev) {
+    const s = liveSym(), q = s && quotes[s];
+    $("live").hidden = !s; if (!s) return;
+    $("lvSym").textContent = s;
+    const px = $("lvPx");
+    if (!q || q.c == null) { px.textContent = "—"; $("lvChg").textContent = ""; $("lvAge").textContent = ""; return; }
+    px.textContent = fmtPx(q.c);
+    const dc = dayChange(q);
+    $("lvChg").textContent = dc ? `${fmtSignedPx(dc.d)} (${fmtPct(dc.dp)}) today` : "";
+    $("lvChg").className = "lv-chg " + (dc ? cls(dc.d) : "flat");
+    $("lvAge").textContent = q.t ? "last trade " + tFmt.format(new Date(q.t)) : "";
+    if (prev != null && q.c !== prev) { const c = q.c > prev ? "tick-up" : "tick-down"; px.classList.remove("tick-up", "tick-down"); void px.offsetWidth; px.classList.add(c); }
+  }
   function drawChart() {
     const cv = $("bigChart");
     const w = cv.clientWidth, h = cv.clientHeight; if (!w || !h) return;
@@ -1283,6 +1310,8 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
     const css = getComputedStyle(document.documentElement), tok = (n) => css.getPropertyValue(n).trim();
     const rem = parseFloat(css.fontSize) || 16;
     const { series, tmin, tmax, unit, single } = chartSeries();
+    renderLive(); $("nowDot").hidden = true;
+    const tight = single && chartRangeKey === "1D";
     const R = RANGES[chartRangeKey], rk = chartRangeKey;
     const combo = priceAll(), lg = combo && priceLog;
     $("scaleTog").hidden = !combo;
@@ -1330,13 +1359,14 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
       const pad = (b - a) * 0.06; mn = Math.exp(a - pad); mx = Math.exp(b + pad);
     } else {
     { const span0 = Math.max(unit === "pct" ? 0.4 : Math.abs(mx) * 0.004, mx - mn);
-      for (const l of lims) if (l.v >= mn - span0 * 1.5 && l.v <= mx + span0 * 1.5) { mn = Math.min(mn, l.v); mx = Math.max(mx, l.v); l.inside = true; } }
-    const minSpan = unit === "pct" ? 0.4 : Math.max(0.02, Math.abs(mx) * 0.004);
+      const reach = tight ? 0.35 : 1.5;
+      for (const l of lims) if (l.v >= mn - span0 * reach && l.v <= mx + span0 * reach) { mn = Math.min(mn, l.v); mx = Math.max(mx, l.v); l.inside = true; } }
+    const minSpan = unit === "pct" ? 0.4 : Math.max(0.02, Math.abs(mx) * (tight ? 0.0015 : 0.004));
     if (mx - mn < minSpan) { const m = (mx + mn) / 2; mx = m + minSpan / 2; mn = m - minSpan / 2; }
     const padV = (mx - mn) * 0.08; mn -= padV; mx += padV;
     if (unit === "px" && mn < 0 && series.every((r) => r.pts.every((p) => p.v >= 0))) mn = 0;
     }
-    const L = 4 * rem, Rm = 5.2 * rem, T = 0.5 * rem, B = 1.7 * rem;
+    const L = 4 * rem, Rm = (single ? 6.6 : 5.2) * rem, T = 0.5 * rem, B = 1.7 * rem;
     const X = (t) => L + (t - tmin) / Math.max(1, tmax - tmin) * (w - L - Rm);
     const Y = lg ? ((lmn, lmx) => (v) => T + (1 - (Math.log(Math.max(v, 1e-4)) - lmn) / (lmx - lmn)) * (h - T - B))(Math.log(mn), Math.log(mx))
       : (v) => T + (1 - (v - mn) / (mx - mn)) * (h - T - B);
@@ -1390,7 +1420,7 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
       }
       ctx.beginPath();
       pts.forEach((p, i) => i ? ctx.lineTo(X(p.t), Y(p.v)) : ctx.moveTo(X(p.t), Y(p.v)));
-      ctx.strokeStyle = r.color; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.lineCap = "round"; ctx.stroke();
+      ctx.strokeStyle = r.color; ctx.lineWidth = single ? Math.max(3.5, 0.24 * rem) : 2; ctx.lineJoin = "round"; ctx.lineCap = "round"; ctx.stroke();
     }
     // limits and costs: a line in the symbol's color with its label at the right, nudged apart;
     // ones far off the chart are listed in the key above it instead
@@ -1423,7 +1453,18 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
     const over = labels.length ? labels[labels.length - 1].y - (h - B) : 0;
     if (over > 0) for (const l of labels) l.y -= over;
     for (let i = 0; i < labels.length; i++) if (labels[i].y < T + 0.4 * rem) labels[i].y = T + 0.4 * rem + i * gapY;
-    for (const l of labels) {
+    if (single) {
+      const r = series[0], y = Math.round(Y(r.last)) + 0.5, q = quotes[single], up = q && q.pc ? r.last >= q.pc : true;
+      const col = tok(up ? "--up" : "--down");
+      ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.setLineDash([3, 4]);
+      ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(w - Rm, y); ctx.stroke(); ctx.setLineDash([]);
+      ctx.font = `700 ${0.85 * rem}px ${tok("--f-num")}`;
+      const lab = fmtPx(r.last), tw = ctx.measureText(lab).width, bx = w - Rm + 0.35 * rem, bh = 1.45 * rem;
+      ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(bx - 0.35 * rem, y); ctx.lineTo(bx, y - bh / 2); ctx.lineTo(bx + tw + 0.9 * rem, y - bh / 2); ctx.lineTo(bx + tw + 0.9 * rem, y + bh / 2); ctx.lineTo(bx, y + bh / 2); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = tok("--ink"); ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(lab, bx + 0.45 * rem, y);
+      const dot = $("nowDot"); dot.hidden = false; dot.style.left = X(tmax) + "px"; dot.style.top = Y(r.last) + "px"; dot.style.background = r.color; dot.style.color = r.color;
+    }
+    for (const l of single ? [] : labels) {
       const x = X(tmax), y = Y(l.r.last);
       ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2); ctx.fillStyle = tok("--panel"); ctx.fill();
       ctx.beginPath(); ctx.arc(x, y, 3.2, 0, Math.PI * 2); ctx.fillStyle = l.r.color; ctx.fill();
@@ -1615,6 +1656,7 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
       clearTimeout(e.ft); e.ft = setTimeout(() => e.card.classList.remove(c), 700);
     }
     updateCard(s); scheduleTotals();
+    if (view !== "board" && liveSym() === s) renderLive(prev);
   }
 
   // ---------- sample engine ----------
