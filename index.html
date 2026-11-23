@@ -699,6 +699,7 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
       <div class="px-row"><span class="px">—</span><span class="chg flat"></span></div>
       <canvas class="spark" aria-hidden="true"></canvas>
       <div class="keyline"><span class="k-l"></span><span class="k-v"></span></div>
+      <div class="keyline k2" hidden><span class="k-l">Avg price paid</span><span class="k-v k2v"></span></div>
       <div class="range"><span class="lo">Day —</span><div class="rbar"><span class="fill"></span><span class="pc"></span><span class="mk"></span></div><span class="hi">—</span></div>
       <div class="range r52" hidden><span class="lo52">52w —</span><div class="rbar"><span class="fill f52"></span><span class="mk m52"></span></div><span class="hi52">—</span></div>
       <div class="stats" hidden><span>Volume <b class="s-vol">—</b></span><span>Avg <b class="s-avg">—</b></span></div>
@@ -716,7 +717,7 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
       basis: a.querySelector(".p-basis"), alloc: a.querySelector(".p-alloc"),
       r52: a.querySelector(".r52"), lo52: a.querySelector(".lo52"), hi52: a.querySelector(".hi52"), f52: a.querySelector(".f52"), m52: a.querySelector(".m52"),
       stats: a.querySelector(".stats"), vol: a.querySelector(".s-vol"), avg: a.querySelector(".s-avg"),
-      kl: a.querySelector(".k-l"), kv: a.querySelector(".k-v")
+      kl: a.querySelector(".k-l"), kv: a.querySelector(".k-v"), k2: a.querySelector(".k2"), k2v: a.querySelector(".k2v")
     };
     return a;
   }
@@ -779,6 +780,8 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
         else if (!V().hide) { l = "Market value"; v = usd.format(sh * q.c); }
       }
       e.kl.textContent = l; e.kv.textContent = v; e.kv.className = c;
+      const ac = x && heldOf(x) ? num(x.cost) : null;
+      e.k2.hidden = ac == null; if (ac != null) e.k2v.textContent = M("$" + fmtPx(ac));
     }
     const os = V().orders.filter((o) => o.s === s);
     e.chips.innerHTML = os.map((o) => {
@@ -1101,11 +1104,11 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
       if (wait > 0) { await sleep(wait); if (gen !== tdGen) return; }
       if (tdBudget().n >= TD_DAY_MAX) { tdState = "budget"; tdq.length = 0; tdPending.clear(); break; }
       const job = tdq.shift(); tdLast = Date.now(); tdSpend();
-      try { await job.run(); if (gen !== tdGen) return; tdState = "ok"; tdPending.delete(job.id); }
+      try { await job.run(); if (gen !== tdGen) return; tdState = "ok"; tdPending.delete(job.id); if (hintOn) histHint(); }
       catch (e) {
         if (gen !== tdGen) return;
         if (e.code === "rate") { tdq.unshift(job); tdLast = Date.now() + 52000; tdState = "rate"; }
-        else { tdPending.delete(job.id); if (e.code === "badkey" || e.code === "net") { tdState = e.code === "net" ? "blocked" : "badkey"; tdq.length = 0; tdPending.clear(); } }
+        else { tdPending.delete(job.id); if (e.code === "badkey" || e.code === "net") { tdState = e.code === "net" ? "blocked" : "badkey"; tdq.length = 0; tdPending.clear(); histHint(); } }
       }
       scheduleChart();
     }
@@ -1155,10 +1158,12 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
   function chartSyms() {
     return chartSym && allSyms().some((x) => x.s === chartSym) ? [chartSym] : allSyms().slice(0, PAL.length).map((x) => x.s);
   }
+  const PAGE_T0 = Date.now();
   function ensureHist() {
     if (!liveHist()) return;
     if (view === "board") {
-      const R = RANGES["1D"], ttl = market.session === "regular" ? 45 * 60e3 : 6 * 3600e3;
+      // Fresh bars right after the page opens, so today's line runs from the open up to the live stream.
+      const R = RANGES["1D"], ttl = market.session === "regular" ? (Date.now() - PAGE_T0 < 3 * 60e3 ? 5 * 60e3 : 45 * 60e3) : 6 * 3600e3;
       for (const x of allSyms()) { const e = hist[x.s + "|" + R.int]; if (!e || Date.now() - e.at > ttl) tdAdd("h:" + x.s + "|" + R.int, 2, histJob(x.s, R)); }
       return;
     }
@@ -1742,8 +1747,22 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
     }
     else if (m === "blocked") showBanner(`<b>Live prices can't load here.</b> This viewer blocks outside data. Open your own copy of this page in Safari or Chrome to stream prices. Showing sample prices for now.`);
     else if (m === "badkey") showBanner(`<b>Finnhub didn't accept that key.</b> Check it in Edit.`);
-    else hideBanner();
+    else if (!histHint()) hideBanner();
     updateAges(); renderFeedInfo();
+  }
+  // Without history, today's lines can only start when the page opened. Say so, and how to fix it.
+  let hintOn = false;
+  function histHint() {
+    const live = mode === "live" || mode === "connecting" || mode === "reconnecting";
+    let msg = "";
+    if (live && !demo && allSyms().length) {
+      if (!cfg.tdKey) msg = `<b>Today's lines start when you opened this page.</b> Add a free Twelve Data key in Edit and they fill in from the market open.`;
+      else if (tdState === "badkey") msg = `<b>Twelve Data didn't accept that key.</b> Check it in Edit so today's lines fill in from the open.`;
+      else if (tdState === "blocked") msg = `<b>Twelve Data can't be reached from here,</b> so today's lines start when you opened this page.`;
+    }
+    if (msg) { showBanner(msg); hintOn = true; return true; }
+    if (hintOn) { hideBanner(); hintOn = false; }
+    return false;
   }
   function showBanner(html) { const b = $("banner"); b.innerHTML = html; b.hidden = false; }
   function hideBanner() { $("banner").hidden = true; }
