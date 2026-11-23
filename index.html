@@ -11,7 +11,6 @@
 <meta name="robots" content="noindex,nofollow">
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}img{max-width:100%}[hidden]{display:none!important}</style>
 <title>Ticker Wall</title>
-<title>Ticker Wall</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
 /* Layout: a trading-floor wall. Header strip, totals row, card grid with an orders rail on wide screens; one column on phones. */
@@ -1307,8 +1306,7 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
       $("offKey").innerHTML = "";
       $("tip").hidden = true; return;
     }
-    // Log scale: equal heights mean equal % moves, so a $30 and a $900 stock both show their swings.
-    const sc = lg ? Math.log : (v) => v;
+    // Log scale (combined price view): equal heights mean equal % moves, so a $30 and a $900 stock both show their swings.
     let mn = unit === "pct" ? 0 : Infinity, mx = unit === "pct" ? 0 : -Infinity;
     for (const r of series) for (const p of r.pts) { if (p.v < mn) mn = p.v; if (p.v > mx) mx = p.v; }
     // Limit and cost lines only while positions are shown.
@@ -1339,7 +1337,8 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
     }
     const L = 4 * rem, Rm = 5.2 * rem, T = 0.5 * rem, B = 1.7 * rem;
     const X = (t) => L + (t - tmin) / Math.max(1, tmax - tmin) * (w - L - Rm);
-    const smn = sc(mn), smx = sc(mx), Y = (v) => T + (1 - (sc(Math.max(v, 1e-4)) - smn) / (smx - smn)) * (h - T - B);
+    const Y = lg ? ((lmn, lmx) => (v) => T + (1 - (Math.log(Math.max(v, 1e-4)) - lmn) / (lmx - lmn)) * (h - T - B))(Math.log(mn), Math.log(mx))
+      : (v) => T + (1 - (v - mn) / (mx - mn)) * (h - T - B);
     // grid + y labels
     const ys = niceStep(mx - mn, 5);
     const yDec = ys < 0.1 ? 2 : ys < 1 ? (unit === "px" ? 2 : 1) : 0;
@@ -1462,11 +1461,10 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
     const d = v >= 100 ? 0 : v >= 10 ? (Math.abs(v - Math.round(v)) < 1e-6 ? 0 : 1) : 2;
     return v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
   }
-  let hoverY = null;
   const tipWeek = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   const tipDay = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
-  $("bigChart").addEventListener("pointermove", (ev) => { const b = ev.currentTarget.getBoundingClientRect(); hoverX = ev.clientX - b.left; hoverY = ev.clientY - b.top; scheduleChart(); });
-  $("bigChart").addEventListener("pointerleave", () => { hoverX = null; hoverY = null; scheduleChart(); });
+  $("bigChart").addEventListener("pointermove", (ev) => { const b = ev.currentTarget.getBoundingClientRect(); hoverX = ev.clientX - b.left; scheduleChart(); });
+  $("bigChart").addEventListener("pointerleave", () => { hoverX = null; scheduleChart(); });
   document.querySelector(".ranges:not(.scales)").addEventListener("click", (ev) => {
     const b = ev.target.closest("[data-range]"); if (!b) return;
     chartRangeKey = b.dataset.range; saveChartPrefs(); syncRangeButtons(); ensureHist(); scheduleChart();
