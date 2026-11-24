@@ -1900,9 +1900,15 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
     if (h) return `${h}h ${String(m).padStart(2, "0")}m`;
     return `${m}:${String(sec).padStart(2, "0")}`;
   }
+  const bellTime = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
+  const bellDay = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" });
   function renderBell() {
     const el = $("clockCd"), now = Date.now(), b = nextBell(now);
-    const t = b ? (b.kind === "open" ? "opens in " : b.early ? "early close in " : "closes in ") + fmtLeft(b.at - now) : "";
+    let t = "";
+    if (b) {
+      const day = etDateFmt.format(new Date(b.at)) !== etDateFmt.format(new Date(now)) ? bellDay.format(new Date(b.at)) + " " : "";
+      t = `${b.kind === "open" ? "Opens" : b.early ? "Early close" : "Closes"} ${day}${bellTime.format(new Date(b.at))} ET · ${fmtLeft(b.at - now)}`;
+    }
     if (el.textContent !== t) el.textContent = t;
   }
   function clockMarket() {
@@ -2077,7 +2083,7 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
   const onFs = () => { const on = !!(document.fullscreenElement || document.webkitFullscreenElement); document.body.classList.toggle("is-fs", on); $("fsBtn").textContent = on ? "Exit full screen" : "Full screen"; window.scrollTo(0, 0); setTimeout(() => { layoutWall(); for (const s of Object.keys(els)) drawSpark(s); scheduleChart(); }, 120); };
   document.addEventListener("fullscreenchange", onFs); document.addEventListener("webkitfullscreenchange", onFs);
 
-  const clockFmt = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" });
+  const clockFmt = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit", timeZoneName: "short" });
   setInterval(() => { $("clock").textContent = clockFmt.format(new Date()); renderBell(); updateAges(); }, 1000);
   $("clock").textContent = clockFmt.format(new Date()); renderBell();
   window.addEventListener("resize", () => { layoutWall(); for (const s of Object.keys(els)) drawSpark(s); scheduleChart(); });
