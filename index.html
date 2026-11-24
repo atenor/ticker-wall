@@ -62,6 +62,7 @@ button { cursor: pointer; }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--up) 60%, transparent); } 70% { box-shadow: 0 0 0 0.45rem transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
 .spacer { flex: 1; }
 .clock { font-family: var(--f-num); font-size: 1.05rem; color: var(--muted); white-space: nowrap; }
+.clock-cd { font-family: var(--f-num); font-size: 0.78rem; color: var(--muted); opacity: 0.8; white-space: nowrap; margin-left: -0.35rem; }
 .btn { border: 1px solid var(--line); background: var(--panel); border-radius: 0.5rem; padding: 0.4rem 0.8rem; font-weight: 600; font-size: 0.85rem; }
 .btn:hover { border-color: var(--brass); }
 .btn[aria-pressed="true"] { border-color: var(--brass); color: var(--brass); }
@@ -381,7 +382,7 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
 }
 @media (max-width: 480px) {
   .cards { grid-template-columns: minmax(0, 1fr); }
-  .clock { display: none; }
+  .clock, .clock-cd { display: none; }
   .tot strong { font-size: 1.4rem; }
 }
 @media (max-width: 480px) { .views { order: 5; width: 100%; } .views button { flex: 1; } .tape-head, .tape li { grid-template-columns: 5.4em 4.8em minmax(0,1fr) 3.8em 1.2em; gap: 0.35rem; } .tape { font-size: 0.8rem; } }
@@ -403,7 +404,7 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
     <button type="button" role="tab" data-view="activity" aria-selected="false">Activity</button>
   </div>
   <div class="spacer"></div>
-  <span class="clock" id="clock">--:--:--</span>
+  <span class="clock" id="clock">--:--:--</span><span class="clock-cd" id="clockCd" title="Regular NYSE hours, 9:30 AM to 4:00 PM Eastern"></span>
   <button class="btn" id="hideBtn" type="button" aria-pressed="true">Show positions</button>
   <button class="btn info-btn" id="infoBtn" type="button" aria-expanded="false" aria-controls="feedPop" aria-label="About the data" title="About the data">i</button>
   <button class="btn" id="fsBtn" type="button">Full screen</button>
@@ -1870,13 +1871,48 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
     const o = {}; for (const p of f.formatToParts(new Date())) o[p.type] = p.value;
     return { wd: o.weekday, mins: (parseInt(o.hour, 10) % 24) * 60 + parseInt(o.minute, 10) };
   }
+  // NYSE full closures and 1:00 PM early closes, from NYSE's published 2026 to 2028 calendar.
+  const NYSE_CLOSED = new Set(["2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03", "2026-05-25", "2026-06-19", "2026-07-03", "2026-09-07", "2026-11-26", "2026-12-25",
+    "2027-01-01", "2027-01-18", "2027-02-15", "2027-03-26", "2027-05-31", "2027-06-18", "2027-07-05", "2027-09-06", "2027-11-25", "2027-12-24",
+    "2028-01-17", "2028-02-21", "2028-04-14", "2028-05-29", "2028-06-19", "2028-07-04", "2028-09-04", "2028-11-23", "2028-12-25"]);
+  const NYSE_EARLY = new Set(["2026-11-27", "2026-12-24", "2027-11-26", "2028-07-03", "2028-11-24"]);
+  const OPEN_M = 570;
+  const closeMins = (ymd) => NYSE_EARLY.has(ymd) ? 780 : 960;
+  function tradingDay(ymd) { const wd = new Date(ymd + "T12:00:00Z").getUTCDay(); return wd !== 0 && wd !== 6 && !NYSE_CLOSED.has(ymd); }
+  const etFull = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour12: false, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  function etAsUTC(ms) { const o = {}; for (const p of etFull.formatToParts(new Date(ms))) o[p.type] = p.value; return Date.UTC(+o.year, o.month - 1, +o.day, (+o.hour) % 24, +o.minute, +o.second); }
+  function etToMs(ymd, mins) { const [y, m, d] = ymd.split("-").map(Number), g = Date.UTC(y, m - 1, d, 0, mins); let t = g - (etAsUTC(g) - g); t += g - etAsUTC(t); return t; }
+  const addDay = (ymd, n) => new Date(Date.parse(ymd + "T12:00:00Z") + n * 864e5).toISOString().slice(0, 10);
+  // Next regular-session open or close, by the clock and the calendar.
+  function nextBell(now) {
+    const today = etDateFmt.format(new Date(now));
+    if (tradingDay(today)) {
+      const o = etToMs(today, OPEN_M), c = etToMs(today, closeMins(today));
+      if (now < o) return { kind: "open", at: o };
+      if (now < c) return { kind: "close", at: c, early: NYSE_EARLY.has(today) };
+    }
+    for (let i = 1; i < 15; i++) { const d = addDay(today, i); if (tradingDay(d)) return { kind: "open", at: etToMs(d, OPEN_M) }; }
+    return null;
+  }
+  function fmtLeft(ms) {
+    const s = Math.max(0, Math.floor(ms / 1000)), d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+    if (d) return `${d}d ${h}h`;
+    if (h) return `${h}h ${String(m).padStart(2, "0")}m`;
+    return `${m}:${String(sec).padStart(2, "0")}`;
+  }
+  function renderBell() {
+    const el = $("clockCd"), now = Date.now(), b = nextBell(now);
+    const t = b ? (b.kind === "open" ? "opens in " : b.early ? "early close in " : "closes in ") + fmtLeft(b.at - now) : "";
+    if (el.textContent !== t) el.textContent = t;
+  }
   function clockMarket() {
     market.source = "clock";
-    const { wd, mins } = nyParts();
-    if (wd === "Sat" || wd === "Sun") return setMarket("Market closed", "", null);
-    if (mins >= 570 && mins < 960) return setMarket("Market open", "ok", "regular");
-    if (mins >= 240 && mins < 570) return setMarket("Pre-market", "warn", "pre");
-    if (mins >= 960 && mins < 1200) return setMarket("After hours", "warn", "post");
+    const { mins } = nyParts(), today = etDateFmt.format(new Date());
+    if (!tradingDay(today)) return setMarket("Market closed", "", null);
+    const cm = closeMins(today);
+    if (mins >= OPEN_M && mins < cm) return setMarket("Market open", "ok", "regular");
+    if (mins >= 240 && mins < OPEN_M) return setMarket("Pre-market", "warn", "pre");
+    if (mins >= cm && mins < 1200) return setMarket("After hours", "warn", "post");
     setMarket("Market closed", "", null);
   }
 
@@ -2042,8 +2078,8 @@ body.v-activity .order-strip.act-only:empty { display: none !important; }
   document.addEventListener("fullscreenchange", onFs); document.addEventListener("webkitfullscreenchange", onFs);
 
   const clockFmt = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" });
-  setInterval(() => { $("clock").textContent = clockFmt.format(new Date()); updateAges(); }, 1000);
-  $("clock").textContent = clockFmt.format(new Date());
+  setInterval(() => { $("clock").textContent = clockFmt.format(new Date()); renderBell(); updateAges(); }, 1000);
+  $("clock").textContent = clockFmt.format(new Date()); renderBell();
   window.addEventListener("resize", () => { layoutWall(); for (const s of Object.keys(els)) drawSpark(s); scheduleChart(); });
 
   // Home-screen icon for iPhone, drawn at load.
